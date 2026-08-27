@@ -1,126 +1,301 @@
+#include <ncurses.h>
 #include <vector>
+#include <iostream>
 #include <algorithm>
 #include <random>
-#include <ncurses.h>
-#include "tetrominos.h"
 
 using namespace std;
-using tetromino = vector<vector<bool>>;
 using pos = unsigned int;
+using tetromino = vector<vector<bool>>;
 
-constexpr int enter = 10;
+vector<tetromino> tetros{
+    {
+        {0, 0, 0, 0},
+        {1, 1, 1, 1},
+        {0, 0, 0, 0},
+        {0, 0, 0, 0}
+    },
+    
+    {
+        {1, 1},
+        {1, 1}
+    },
 
-constexpr pos rows = 20, columns = 10;
+    {
+        {0, 1, 0},
+        {1, 1, 1},
+        {0, 0, 0}
+    },
 
-vector<vector<bool>> matrix(rows, vector<bool>(columns, 0));
+    {
+        {0, 1, 1},
+        {1, 1, 0},
+        {0, 0, 0}
+    },
 
-void draw(pos x = 0, pos y = 0) {
+    {
+        {1, 1, 0},
+        {0, 1, 1},
+        {0, 0, 0}
+    },
+
+    {
+        {0, 0, 1},
+        {1, 1, 1},
+        {0, 0, 0}
+    },
+    
+    {
+        {1, 0, 0},
+        {1, 1, 1},
+        {0, 0, 0}
+    }
+};
+
+constexpr pos cols = 10, rows = 20;
+constexpr pos fps = 60; 
+
+pos pull_counter = 0;
+pos level, score, lines;
+
+vector<vector<bool>> matrix(rows, vector<bool>(cols, 0));
+
+void print_stats(pos x = cols*2+7, pos y = 0) {
+    move(y, x);
+
+    printw("Level: %d", level);
+
+    move(y+2, x);
+
+    printw("Score: %d", score);
+
+    move(y+4, x);
+
+    printw("Lines: %d", lines);
+}
+
+void print_matrix() {
     clear();
+
+    pos line = 0;
+
     for(const vector<bool> &row : matrix) {
-        move(y, x);
-        for(const bool &col : row) {
-            if(col) {
+        addstr("<!");
+        for(const bool &state : row) {
+            if(state) {
                 addstr("[]");
             } else {
                 addstr(" .");
             }
         }
-        ++y;
+        addstr("!>");
+
+        line++;
+        move(line, 0);
     }
-    move(y, x);
+
+    addstr("<!");
+    for(int i = 0; i < cols; i++) {
+        addstr("==");
+    }
+    addstr("!>");
+    
+    print_stats();
+
     refresh();
 }
 
-struct Tetro {
+void update_matrix() {
+    pos i = 0;
+
+    for(vector<bool> &row : matrix) {
+        bool filled = true;
+
+        for(bool state : row) {
+            if(!state) {
+                filled = false;
+                break;
+            }    
+        }
+
+        if(filled) {
+            fill(row.begin(), row.end(), 0);
+
+            for(int j = i; j > 0; j--) {
+                matrix[j] = matrix[j-1];
+            }
+            lines++;
+            score+= 100;
+        }
+        i++;
+    }
+    print_matrix(); 
+}
+
+void clear_matrix() {
+    fill(matrix.begin(), matrix.end(), vector<bool>(cols, 0));
+    print_matrix();
+}
+
+class tetro {
     tetromino shape;
-    pos size;
-    bool falling = false;
 
-    pos pos_x = 0, pos_y = 0;
+    public:
+        int X = 0, Y = 0;
+        pos size;
 
-    template <typename function>
-    void loop(pos startx, pos starty, function func) {
-        for(pos row = starty; row < size; ++row) {
-            for(pos col = startx; col < size; ++col) {
-                func(row, col);
-            }
+    bool in_bounds(int x, int y) {
+        if(x >= 0 && x < cols && y >= 0 && y < rows) {
+            return true; 
+        } else {
+            return false;
         }
     }
 
-    bool collides(pos x, pos y) {
-        for(pos row = y; row < size; ++row) {
-            for(pos col = x; col < size; ++col) {
-                if(shape[row][col]) {
-                    if(matrix[y+row][x+col] == 1 || row < 0 || row >= rows || col < 0 || col >= columns) {
-                        return true;
+    void clear_tetro(vector<vector<bool>> &target = matrix) {
+        int x = X, y = Y;
+        for(const vector<bool> &row : shape) {
+            for(const bool &col : row) {
+                if(col) {
+                    if(in_bounds(x, y)) {
+                        target[y][x] = 0;
                     }
-            }   }
-        }
-        return false;
-    }
-
-    void clear(pos x, pos y) {
-        loop(x, y, [](pos col, pos row) {
-            matrix[row][col] = 0;
-        });
-    }
-
-    void insert(pos x, pos y) {
-        if(collides(x, y)) return;
-
-        clear(pos_x, pos_y);
-
-        loop(0, 0, [&](pos row, pos col) {
-            if(shape[row][col]) {
-                matrix[y+row][x+col] = 1;
+                }
+                x++;
             }
-        });
+            y++;
+            x = X;
+        }
+    }
 
-        pos_x = x;
-        pos_y = y;
+    public:
+        bool collides(int x, int y) {
+            vector<vector<bool>> matrix_cp = matrix;
+            clear_tetro(matrix_cp);
+
+            int init_x = x;
+
+            for(const vector<bool> &row : shape) {
+                for(const bool &col : row) {
+                    if(col) {
+                        if(!in_bounds(x, y) || matrix_cp[y][x]) {
+                            return true;
+                        }
+                    }
+                    x++;
+                }
+                y++;
+                x = init_x;
+            }
+            return false;
+        }
+
+    void insert(int x, int y) {
+        if(collides(x, y)) {
+            return;
+        }
+
+        clear_tetro();
+
+        X = x, Y = y;
+
+        int init_x = x;
+
+        for(const vector<bool> &row : shape) {
+            for(const bool &col : row) {
+                if(col) {
+                    matrix[y][x] = 1;
+                }
+                x++;
+            }
+            y++;
+            x = init_x;
+        }
+        print_matrix();
     }
 
     void rotate() {
-        tetromino origin = shape;
+        tetromino shape_cp = shape, rotated(size, vector<bool>(size, 0));
 
-        loop(0, 0, [&](pos x, pos y) {
-            shape[x][size-1-y] = origin[y][x];
-        });
+        for(int row = 0; row < size; row++) {
+            for(int col = 0; col < size; col++) {
+                if(shape[row][col]) {
+                    rotated[col][size-row-1] = 1;
+                }
+            }
+        }
 
-        vector<vector<bool>> matrix_origin = matrix;
+        clear_tetro();
 
-        clear(pos_x, pos_y);
+        shape = rotated;
 
-        if(collides(pos_x, pos_y)) {
-            shape = origin;
-            matrix = matrix_origin;
+        if(collides(X, Y)) {
+            shape = shape_cp;
+            insert(X, Y);
             return;
         } else {
-            insert(pos_x, pos_y);
+            insert(X, Y);
         }
     }
+
+    void shuffle_tetros() {
+        random_device random;
+        shuffle(tetros.begin(), tetros.end(), random);
+    }
+
+    public:
+        void move(int dir) {
+            switch(dir) {
+                case KEY_LEFT:
+                    insert(X-1, Y);
+                    break;
+                case KEY_RIGHT:
+                    insert(X+1, Y);
+                    break;
+                case KEY_DOWN:
+                    insert(X, Y+1);
+                    score++;
+                    break;
+                case KEY_UP:
+                    rotate();
+                    break;
+                case 's':
+                    insert(X, Y+1);
+                    break;
+            }
+        }
+
+        tetro() {
+            if(pull_counter == 0) {
+                shuffle_tetros();
+            }
+
+            shape = tetros[pull_counter];
+            size = shape.size();
+
+            pull_counter++;
+            pull_counter %= tetros.size();
+
+            insert((cols-size+1)/2, 0);
+        }
 };
 
-void shuffle_tetros() {
-    random_device rng;
-    shuffle(tetros.begin(), tetros.end(), rng);
-}
+bool running = true, started = false;
 
 int main() {
     initscr();
     cbreak();
     noecho();
-
-    bool running = true, started = false;
-
-    pos i = 0;
-    shuffle_tetros();
+    keypad(stdscr, TRUE);
+    timeout(1000/fps);
 
     while(running) {
-        draw();
+        level = 1, score = 0, lines = 0;
+
+        print_matrix();
         
         switch(getch()) {
-            case enter:
+            case 'e':
                 started = true;
                 break;
             case 'q':
@@ -128,21 +303,33 @@ int main() {
                 break;
         }
 
-        if(started) {
-            if(i == tetros.size()) {
-                shuffle_tetros();
-                i = 0;                
-            }
+        while(started) {
+            tetro part;
             
-            Tetro tetro;
-            tetro.shape = tetros[i];
-            tetro.size = tetro.shape.size();
-            tetro.falling = true;
-            //tetro.insert((columns-tetro.size)/2+1, 0);
-            tetro.insert(1, 1);
-            while(tetro.falling) {
-                draw();
-                getch();
+            if(part.collides((cols-part.size+1)/2, 0)) {
+                started = false;
+                clear_matrix();
+                break;
+            }
+
+            float time_counter = 0;
+
+            while(true) {
+                part.move(getch());
+
+                time_counter += 1000/fps;
+
+                if(time_counter > 2000/pow(2, level)) {
+                    if(part.collides(part.X, part.Y+1)) {
+                        update_matrix();
+                        break;
+                    } else {
+                        part.move('s');
+                        time_counter = 0;
+                    }
+                }
+
+                level = score/1000+1;
             }
         }
     }
